@@ -451,7 +451,7 @@ func (f *Fnt) getCharSpr(c rune, bank int32) *Sprite {
 }*/
 
 func (f *Fnt) drawChar(x, y, xscl, yscl float32, bank int32, c rune,
-	pal []uint32, window *[4]int32) float32 {
+	pal []uint32, window *[4]int32, absolute bool) float32 {
 
 	if c == ' ' {
 		return float32(f.Size[0]) * xscl
@@ -467,10 +467,17 @@ func (f *Fnt) drawChar(x, y, xscl, yscl float32, bank int32, c rune,
 	//spr.Draw(x, y, xscl, yscl, pal, nil, nil, window)
 	x -= xscl * float32(spr.Offset[0])
 	y -= yscl * float32(spr.Offset[1])
-	spr.glDraw(pal, 0, -x*sys.widthScale,
-		-y*sys.heightScale, &notiling, xscl*sys.widthScale, xscl*sys.widthScale,
-		yscl*sys.heightScale, 0, 0, 0, 0,
-		sys.brightness*255>>8|1<<9, window, 0, 0, nil, nil)
+	if absolute {
+		spr.glDraw(pal, 0, -x,
+			-y, &notiling, xscl, xscl,
+			yscl, 0, 0, 0, 0,
+			sys.brightness*255>>8|1<<9, window, 0, 0, nil, nil)
+	} else {
+		spr.glDraw(pal, 0, -x*sys.widthScale,
+			-y*sys.heightScale, &notiling, xscl*sys.widthScale, xscl*sys.widthScale,
+			yscl*sys.heightScale, 0, 0, 0, 0,
+			sys.brightness*255>>8|1<<9, window, 0, 0, nil, nil)
+	}
 
 	//if pal != nil {
 	//	RenderMugenPal(*spr.Tex, 0, spr.Size, -x*sys.widthScale,
@@ -491,23 +498,27 @@ func (f *Fnt) Print(txt string, x, y, xscl, yscl float32, bank, align int32,
 	window *[4]int32, palfx *PalFX) {
 	if !sys.frameSkip {
 		if f.Type == "truetype" {
-			f.DrawTtf(txt, x, y, xscl, yscl, align, false, window, palfx.frgba)
+			f.DrawTtf(txt, x, y, xscl, yscl, align, false, window, palfx.frgba, false)
 		} else {
-			f.DrawText(txt, x, y, xscl, yscl, bank, align, window, palfx)
+			f.DrawText(txt, x, y, xscl, yscl, bank, align, window, palfx, false)
 		}
 	}
 }
 
 //DrawText prints on screen a specified text with the current font sprites
 func (f *Fnt) DrawText(txt string, x, y, xscl, yscl float32, bank, align int32,
-	window *[4]int32, palfx *PalFX) {
+	window *[4]int32, palfx *PalFX, absolute bool) {
 
 	if len(txt) == 0 {
 		return
 	}
 
-	x += float32(f.offset[0])*xscl + float32(sys.gameWidth-320)/2
-	y += float32(f.offset[1]-int32(f.Size[1])+1)*yscl + float32(sys.gameHeight-240)
+	x += float32(f.offset[0])*xscl
+	y += float32(f.offset[1]-int32(f.Size[1])+1)*yscl
+	if !absolute {
+		x += float32(sys.gameWidth-320)/2
+		y += float32(sys.gameHeight-240)
+	}
 
 	if align == 0 {
 		x -= float32(f.TextWidth(txt)) * xscl * 0.5
@@ -543,20 +554,23 @@ func (f *Fnt) DrawText(txt string, x, y, xscl, yscl float32, bank, align int32,
 	}
 
 	for _, c := range txt {
-		x += f.drawChar(x, y, xscl, yscl, bank, c, pal, window) + xscl*float32(f.Spacing[0])
+		x += f.drawChar(x, y, xscl, yscl, bank, c, pal, window, absolute) + xscl*float32(f.Spacing[0])
 	}
 	//gl.DeleteTextures(1, &paltex)
 	//gl.Disable(gl.TEXTURE_1D)
 }
 
 func (f *Fnt) DrawTtf(txt string, x, y, xscl, yscl float32, align int32,
-	blend bool, window *[4]int32, frgba [4]float32) {
+	blend bool, window *[4]int32, frgba [4]float32, absolute bool) {
 
 	if len(txt) == 0 {
 		return
 	}
 
-	x += float32(f.offset[0])*xscl + float32(sys.gameWidth-320)/2
+	x += float32(f.offset[0])*xscl
+	if !absolute {
+		x += float32(sys.gameWidth-320)/2
+	}
 	//y += float32(f.offset[1]-int32(f.Size[1])+1)*yscl + float32(sys.gameHeight-240)
 
 	win := [4]int32{(*window)[0], sys.scrrect[3] - ((*window)[1] + (*window)[3]),
@@ -579,19 +593,26 @@ func NewTextSprite() *TextSprite {
 	return &TextSprite{align: 1, xscl: 1, yscl: 1, window: sys.scrrect, palfx: newPalFX()}
 }
 
-func (ts *TextSprite) SetWindow(x, y, w, h float32) {
-	ts.window[0] = int32((x + float32(sys.gameWidth-320)/2) * sys.widthScale)
-	ts.window[1] = int32((y + float32(sys.gameHeight-240)) * sys.heightScale)
-	ts.window[2] = int32(w*sys.widthScale + 0.5)
-	ts.window[3] = int32(h*sys.heightScale + 0.5)
+func (ts *TextSprite) SetWindow(x, y, w, h float32, absolute bool) {
+	if absolute {
+		ts.window[0] = int32(x)
+		ts.window[1] = int32(y)
+		ts.window[2] = int32(w + 0.5)
+		ts.window[3] = int32(h + 0.5)
+	} else {
+		ts.window[0] = int32((x + float32(sys.gameWidth-320)/2) * sys.widthScale)
+		ts.window[1] = int32((y + float32(sys.gameHeight-240)) * sys.heightScale)
+		ts.window[2] = int32(w*sys.widthScale + 0.5)
+		ts.window[3] = int32(h*sys.heightScale + 0.5)
+	}
 }
 
-func (ts *TextSprite) Draw() {
+func (ts *TextSprite) Draw(absolute bool) {
 	if !sys.frameSkip && ts.fnt != nil {
 		if ts.fnt.Type == "truetype" {
-			ts.fnt.DrawTtf(ts.text, ts.x, ts.y, ts.xscl, ts.yscl, ts.align, true, &ts.window, ts.palfx.frgba)
+			ts.fnt.DrawTtf(ts.text, ts.x, ts.y, ts.xscl, ts.yscl, ts.align, true, &ts.window, ts.palfx.frgba, absolute)
 		} else {
-			ts.fnt.DrawText(ts.text, ts.x, ts.y, ts.xscl, ts.yscl, ts.bank, ts.align, &ts.window, ts.palfx)
+			ts.fnt.DrawText(ts.text, ts.x, ts.y, ts.xscl, ts.yscl, ts.bank, ts.align, &ts.window, ts.palfx, absolute)
 		}
 	}
 }

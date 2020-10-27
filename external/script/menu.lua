@@ -189,7 +189,7 @@ for k, v in pairs(
 						menu[v.id].submenu[c].loop = menu.createMenu(menu[v.id].submenu[c], v.section, v.bgdef, menu[v.txt_title], false)
 					end
 					if not main.t_sort[v.section][i]:match(c .. '_') then
-						table.insert(menu[v.id].items, {data = text:create({window = t_menuWindow}), itemname = c, displayname = motif[v.section]['menu_itemname_' .. main.t_sort[v.section][i]], vardata = text:create({window = t_menuWindow}), vardisplay = menu.f_vardisplay(c), selected = false})
+						table.insert(menu[v.id].items, {data = text:create({}), window = t_menuWindow, itemname = c, displayname = motif[v.section]['menu_itemname_' .. main.t_sort[v.section][i]], vardata = text:create({}), vardisplay = menu.f_vardisplay(c), selected = false})
 					end
 				end
 				t_pos = menu[v.id].submenu[c]
@@ -205,7 +205,7 @@ for k, v in pairs(
 						t_pos.submenu[c].items = {}
 						t_pos.submenu[c].loop = menu.createMenu(t_pos.submenu[c], v.section, v.bgdef, menu[v.txt_title], false)
 					end
-					table.insert(t_pos.items, {data = text:create({window = t_menuWindow}), itemname = c, displayname = motif[v.section]['menu_itemname_' .. main.t_sort[v.section][i]], vardata = text:create({window = t_menuWindow}), vardisplay = menu.f_vardisplay(c), selected = false})
+					table.insert(t_pos.items, {data = text:create({}), window = t_menuWindow, itemname = c, displayname = motif[v.section]['menu_itemname_' .. main.t_sort[v.section][i]], vardata = text:create({}), vardisplay = menu.f_vardisplay(c), selected = false})
 				end
 				if j > lastNum then
 					t_pos = t_pos.submenu[c]
@@ -409,7 +409,6 @@ for _, v in ipairs({'menu_info', 'training_info'}) do
 		}
 
 	end
-	menu[v .. '_txt_text']:update({window = menu[v .. '_t_movelistWindow']})
 end
 
 function menu.commandlistRender(section, t)
@@ -531,7 +530,7 @@ function menu.commandlistRender(section, t)
 						g = v.col.g or motif[section].movelist_text_font[5],
 						b = v.col.b or motif[section].movelist_text_font[6],
 						src = v.col.src or motif[section].movelist_text_font[7],
-						dst = v.col.dst or motif[section].movelist_text_font[8],
+						dst = v.col.dst or motif[section].movelist_text_font[8]
 					})
 					data:draw()
 					if k < #cmdList[n] then

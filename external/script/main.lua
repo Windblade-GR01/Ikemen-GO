@@ -13,10 +13,15 @@ if main.flags['-stats'] == nil then main.flags['-stats'] = 'save/stats.json' end
 --One-time load of the json routines
 json = (loadfile 'external/script/dkjson.lua')()
 
+file_def = require('external.script.file_def')
+
 --Data loading from config.json
 local file = io.open(main.flags['-config'], 'r')
 config = json.decode(file:read("*all"))
 file:close()
+
+GameWidth = config.GameWidth
+GameHeight = config.GameHeight
 
 if config.SafeLoading then
 	setGCPercent(-1)
@@ -291,10 +296,28 @@ main.font_def = {}
 text = {}
 color = {}
 rect = {}
+
+function text:get_default_window(full_control)
+	if full_control == true then
+		return { 0, 0, GameWidth, GameHeight }
+	else
+		return { 0, 0, motif.info.localcoord[1], motif.info.localcoord[2] }
+	end
+end
+
 --create text
 function text:create(t)
 	--default values
 	if t.window == nil then t.window = {} end
+	local default_window = text:get_default_window(t.defsc)
+
+	local window = {
+		t.window[1] or default_window[1],
+		t.window[2] or default_window[2],
+		t.window[3] or default_window[3],
+		t.window[4] or default_window[4],
+	}
+
 	local o = {
 		font = t.font or -1,
 		bank = t.bank or 0,
@@ -310,12 +333,7 @@ function text:create(t)
 		src = t.src or 255,
 		dst = t.dst or 0,
 		height = t.height or -1,
-		window = {
-			t.window[1] or 0, 
-			t.window[2] or 0,
-			t.window[3] or motif.info.localcoord[1],
-			t.window[4] or motif.info.localcoord[2]
-		},
+		window = window,
 		defsc = t.defsc or false
 	}
 	o.ti = textImgNew()
@@ -337,7 +355,7 @@ function text:create(t)
 	if o.defsc then main.f_disableLuaScale() end
 	textImgSetPos(o.ti, o.x + main.f_alignOffset(o.align), o.y)
 	textImgSetScale(o.ti, o.scaleX, o.scaleY)
-	textImgSetWindow(o.ti, o.window[1], o.window[2], o.window[3] - o.window[1], o.window[4] - o.window[2])
+	textImgSetWindow(o.ti, o.window[1], o.window[2], o.window[3] - o.window[1], o.window[4] - o.window[2], o.defsc)
 	if o.defsc then main.f_setLuaScale() end
 	return o
 end
@@ -372,14 +390,14 @@ function text:update(t)
 	if self.defsc then main.f_disableLuaScale() end
 	textImgSetPos(self.ti, self.x + main.f_alignOffset(self.align), self.y)
 	textImgSetScale(self.ti, self.scaleX, self.scaleY)
-	textImgSetWindow(self.ti, self.window[1], self.window[2], self.window[3] - self.window[1], self.window[4] - self.window[2])
+	textImgSetWindow(self.ti, self.window[1], self.window[2], self.window[3] - self.window[1], self.window[4] - self.window[2], self.defsc)
 	if self.defsc then main.f_setLuaScale() end
 end
 
 --draw text
-function text:draw()
+function text:draw(absolute)
 	if self.font == -1 then return end
-	textImgDraw(self.ti)
+	textImgDraw(self.ti, absolute)
 end
 
 --create color
@@ -1514,248 +1532,292 @@ function main.f_addStage(file)
 	return stageNo
 end
 
-main.t_includeStage = {{}, {}} --includestage = 1, includestage = -1
-main.t_orderChars = {}
-main.t_orderStages = {}
-main.t_orderSurvival = {}
-main.t_bossChars = {}
-main.t_bonusChars = {}
-main.t_stageDef = {['random'] = 0}
-main.t_charDef = {}
-local t_addExluded = {}
-local chars = 0
-local stages = 0
-local tmp = ''
-local section = 0
-local row = 0
-local slot = false
-local file = io.open(motif.files.select,"r")
-local content = file:read("*all")
-file:close()
-content = content:gsub('([^\r\n;]*)%s*;[^\r\n]*', '%1')
-content = content:gsub('\n%s*\n', '\n')
-for line in content:gmatch('[^\r\n]+') do
---for line in io.lines("data/select.def") do
-	local lineCase = line:lower()
-	if lineCase:match('^%s*%[%s*characters%s*%]') then
-		main.t_selChars = {}
-		main.t_selGrid = {}
-		row = 0
-		section = 1
-	elseif lineCase:match('^%s*%[%s*extrastages%s*%]') then
-		main.t_selStages = {}
-		row = 0
-		section = 2
-	elseif lineCase:match('^%s*%[%s*options%s*%]') then
-		main.t_selOptions = {
-			arcadestart = {wins = 0, offset = 0},
-			arcadeend = {wins = 0, offset = 0},
-			teamstart = {wins = 0, offset = 0},
-			teamend = {wins = 0, offset = 0},
-			survivalstart = {wins = 0, offset = 0},
-			survivalend = {wins = 0, offset = 0},
-			ratiostart = {wins = 0, offset = 0},
-			ratioend = {wins = 0, offset = 0},
-		}
-		row = 0
-		section = 3
-	elseif section == 1 then --[Characters]
-		if lineCase:match(',%s*exclude%s*=%s*1') then --character should be added after all slots are filled
-			table.insert(t_addExluded, line)
-		elseif lineCase:match('^%s*slot%s*=%s*{%s*$') then --start of the 'multiple chars in one slot' assignment
-			table.insert(main.t_selGrid, {['chars'] = {}, ['slot'] = 1})
-			slot = true
-		elseif slot and lineCase:match('^%s*}%s*$') then --end of 'multiple chars in one slot' assignment
-			slot = false
-		else
-			chars = chars + 1
-			main.f_addChar(line, chars, true, slot)
-		end
-	elseif section == 2 then --[ExtraStages]
-		for i, c in ipairs(main.f_strsplit(',', line)) do --split using "," delimiter
-			c = c:gsub('^%s*(.-)%s*$', '%1')
-			if i == 1 then
-				row = main.f_addStage(c)
-				table.insert(main.t_includeStage[1], row)
-				table.insert(main.t_includeStage[2], row)
-			elseif c:match('music[alv]?[li]?[tfc]?[et]?o?r?y?%s*=') then --music / musicalt / musiclife / musicvictory
-				local bgmvolume, bgmloopstart, bgmloopend = 100, 0, 0
-				c = c:gsub('%s+([0-9%s]+)$', function(m1)
-					for i, c in ipairs(main.f_strsplit('%s+', m1)) do --split using whitespace delimiter
-						if i == 1 then
-							bgmvolume = tonumber(c)
-						elseif i == 2 then
-							bgmloopstart = tonumber(c)
-						elseif i == 3 then
-							bgmloopend = tonumber(c)
-						else
+function load_select_def()
+	resetSelect()
+	main.t_includeStage = {{}, {}} --includestage = 1, includestage = -1
+	main.t_orderChars = {}
+	main.t_orderStages = {}
+	main.t_orderSurvival = {}
+	main.t_bossChars = {}
+	main.t_bonusChars = {}
+	main.t_stageDef = {['random'] = 0}
+	main.t_charDef = {}
+	local t_addExluded = {}
+	local chars = 0
+	local stages = 0
+	local tmp = ''
+	local section = 0
+	local row = 0
+	local slot = false
+	for line in io.lines(motif.files.select) do
+		line_parsed = file_def.parse_line(line)
+		if line_parsed["kind"] == "section" then
+			local line_section = line_parsed["section"]:lower()
+			if line_section == "characters" then
+				main.t_selChars = {}
+				main.t_selGrid = {}
+				row = 0
+				section = 1
+			elseif line_section == "extrastages" then
+				main.t_selStages = {}
+				row = 0
+				section = 2
+			elseif line_section == "options" then
+				main.t_selOptions = {
+					arcadestart = {wins = 0, offset = 0},
+					arcadeend = {wins = 0, offset = 0},
+					teamstart = {wins = 0, offset = 0},
+					teamend = {wins = 0, offset = 0},
+					survivalstart = {wins = 0, offset = 0},
+					survivalend = {wins = 0, offset = 0},
+					ratiostart = {wins = 0, offset = 0},
+					ratioend = {wins = 0, offset = 0},
+				}
+				row = 0
+				section = 3
+			end
+		elseif line_parsed["kind"] == "data" then
+			data = line_parsed["data"]:lower()
+			if section == 1 then --[Characters]
+				if data:match(',%s*exclude%s*=%s*1') then --character should be added after all slots are filled
+					table.insert(t_addExluded, data)
+				elseif data:match('^%s*slot%s*=%s*{%s*$') then --start of the 'multiple chars in one slot' assignment
+					table.insert(main.t_selGrid, {['chars'] = {}, ['slot'] = 1})
+					slot = true
+				elseif slot and data:match('^%s*}%s*$') then --end of 'multiple chars in one slot' assignment
+					slot = false
+				else
+					chars = chars + 1
+					main.f_addChar(data, chars, true, slot)
+				end
+			elseif section == 2 then --[ExtraStages]
+				for i, c in ipairs(main.f_strsplit(',', data)) do --split using "," delimiter
+					c = c:gsub('^%s*(.-)%s*$', '%1')
+					if i == 1 then
+						row = main.f_addStage(c)
+						table.insert(main.t_includeStage[1], row)
+						table.insert(main.t_includeStage[2], row)
+					elseif c:match('music[alv]?[li]?[tfc]?[et]?o?r?y?%s*=') then --music / musicalt / musiclife / musicvictory
+						local bgmvolume, bgmloopstart, bgmloopend = 100, 0, 0
+						c = c:gsub('%s+([0-9%s]+)$', function(m1)
+							for i, c in ipairs(main.f_strsplit('%s+', m1)) do --split using whitespace delimiter
+								if i == 1 then
+									bgmvolume = tonumber(c)
+								elseif i == 2 then
+									bgmloopstart = tonumber(c)
+								elseif i == 3 then
+									bgmloopend = tonumber(c)
+								else
+									break
+								end
+							end
+							return ''
+						end)
+						c = c:gsub('\\', '/')
+						local bgtype, bgmusic = c:match('^(music[a-z]*)%s*=%s*(.-)%s*$')
+						if main.t_selStages[row][bgtype] == nil then main.t_selStages[row][bgtype] = {} end
+						table.insert(main.t_selStages[row][bgtype], {bgmusic = bgmusic, bgmvolume = bgmvolume, bgmloopstart = bgmloopstart, bgmloopend = bgmloopend})
+					else
+						local param, value = c:match('^(.-)%s*=%s*(.-)$')
+						if param ~= nil and value ~= nil and param ~= '' and value ~= '' then
+							main.t_selStages[row][param] = tonumber(value)
+							if param:match('order') then
+								if main.t_orderStages[main.t_selStages[row].order] == nil then
+									main.t_orderStages[main.t_selStages[row].order] = {}
+								end
+								table.insert(main.t_orderStages[main.t_selStages[row].order], row)
+							end
+						end
+					end
+				end
+			elseif section == 3 then --[Options]
+				if data:match('%.maxmatches%s*=') then
+					local rowName, alt_line = data:match('^%s*(.-)%.maxmatches%s*=%s*(.+)')
+					rowName = rowName:gsub('%.', '_')
+					main.t_selOptions[rowName .. 'maxmatches'] = {}
+					for i, c in ipairs(main.f_strsplit(',', alt_line:gsub('%s*(.-)%s*', '%1'))) do --split using "," delimiter
+						main.t_selOptions[rowName .. 'maxmatches'][i] = tonumber(c)
+					end
+				elseif data:match('%.ratiomatches%s*=') then
+					local rowName, alt_line = data:match('^%s*(.-)%.ratiomatches%s*=%s*(.+)')
+					rowName = rowName:gsub('%.', '_')
+					main.t_selOptions[rowName .. 'ratiomatches'] = {}
+					for i, c in ipairs(main.f_strsplit(',', alt_line:gsub('%s*(.-)%s*', '%1'))) do --split using "," delimiter
+						local rmin, rmax, order = c:match('^%s*([0-9]+)-?([0-9]*)%s*:%s*([0-9]+)%s*$')
+						rmin = tonumber(rmin)
+						rmax = tonumber(rmax) or rmin
+						order = tonumber(order)
+						if rmin == nil or order == nil or rmin < 1 or rmin > 4 or rmax < 1 or rmax > 4 or rmin > rmax then
+							main.f_warning(main.f_extractText(motif.warning_info.text_ratio_text), motif.title_info, motif.titlebgdef)
+							main.t_selOptions[rowName .. 'ratiomatches'] = nil
 							break
 						end
-					end
-					return ''
-				end)
-				c = c:gsub('\\', '/')
-				local bgtype, bgmusic = c:match('^(music[a-z]*)%s*=%s*(.-)%s*$')
-				if main.t_selStages[row][bgtype] == nil then main.t_selStages[row][bgtype] = {} end
-				table.insert(main.t_selStages[row][bgtype], {bgmusic = bgmusic, bgmvolume = bgmvolume, bgmloopstart = bgmloopstart, bgmloopend = bgmloopend})
-			else
-				local param, value = c:match('^(.-)%s*=%s*(.-)$')
-				if param ~= nil and value ~= nil and param ~= '' and value ~= '' then
-					main.t_selStages[row][param] = tonumber(value)
-					if param:match('order') then
-						if main.t_orderStages[main.t_selStages[row].order] == nil then
-							main.t_orderStages[main.t_selStages[row].order] = {}
+						if rmax == '' then
+							rmax = rmin
 						end
-						table.insert(main.t_orderStages[main.t_selStages[row].order], row)
+						table.insert(main.t_selOptions[rowName .. 'ratiomatches'], {['rmin'] = rmin, ['rmax'] = rmax, ['order'] = order})
 					end
+				elseif data:match('%.airamp%.') then
+					local rowName, rowName2, wins, offset = data:match('^%s*(.-)%.airamp%.(.-)%s*=%s*([0-9]+)%s*,%s*([0-9-]+)')
+					main.t_selOptions[rowName .. rowName2] = {wins = tonumber(wins), offset = tonumber(offset)}
 				end
 			end
-		end
-	elseif section == 3 then --[Options]
-		if lineCase:match('%.maxmatches%s*=') then
-			local rowName, line = lineCase:match('^%s*(.-)%.maxmatches%s*=%s*(.+)')
-			rowName = rowName:gsub('%.', '_')
-			main.t_selOptions[rowName .. 'maxmatches'] = {}
-			for i, c in ipairs(main.f_strsplit(',', line:gsub('%s*(.-)%s*', '%1'))) do --split using "," delimiter
-				main.t_selOptions[rowName .. 'maxmatches'][i] = tonumber(c)
-			end
-		elseif lineCase:match('%.ratiomatches%s*=') then
-			local rowName, line = lineCase:match('^%s*(.-)%.ratiomatches%s*=%s*(.+)')
-			rowName = rowName:gsub('%.', '_')
-			main.t_selOptions[rowName .. 'ratiomatches'] = {}
-			for i, c in ipairs(main.f_strsplit(',', line:gsub('%s*(.-)%s*', '%1'))) do --split using "," delimiter
-				local rmin, rmax, order = c:match('^%s*([0-9]+)-?([0-9]*)%s*:%s*([0-9]+)%s*$')
-				rmin = tonumber(rmin)
-				rmax = tonumber(rmax) or rmin
-				order = tonumber(order)
-				if rmin == nil or order == nil or rmin < 1 or rmin > 4 or rmax < 1 or rmax > 4 or rmin > rmax then
-					main.f_warning(main.f_extractText(motif.warning_info.text_ratio_text), motif.title_info, motif.titlebgdef)
-					main.t_selOptions[rowName .. 'ratiomatches'] = nil
-					break
-				end
-				if rmax == '' then
-					rmax = rmin
-				end
-				table.insert(main.t_selOptions[rowName .. 'ratiomatches'], {['rmin'] = rmin, ['rmax'] = rmax, ['order'] = order})
-			end
-		elseif lineCase:match('%.airamp%.') then
-			local rowName, rowName2, wins, offset = lineCase:match('^%s*(.-)%.airamp%.(.-)%s*=%s*([0-9]+)%s*,%s*([0-9-]+)')
-			main.t_selOptions[rowName .. rowName2] = {wins = tonumber(wins), offset = tonumber(offset)}
 		end
 	end
-end
 
---add default maxmatches / ratiomatches values if config is missing in select.def
-if main.t_selOptions.arcademaxmatches == nil then main.t_selOptions.arcademaxmatches = {6, 1, 1, 0, 0, 0, 0, 0, 0, 0} end
-if main.t_selOptions.teammaxmatches == nil then main.t_selOptions.teammaxmatches = {4, 1, 1, 0, 0, 0, 0, 0, 0, 0} end
-if main.t_selOptions.timeattackmaxmatches == nil then main.t_selOptions.timeattackmaxmatches = {6, 1, 1, 0, 0, 0, 0, 0, 0, 0} end
-if main.t_selOptions.survivalmaxmatches == nil then main.t_selOptions.survivalmaxmatches = {-1, 0, 0, 0, 0, 0, 0, 0, 0, 0} end
-if main.t_selOptions.arcaderatiomatches == nil then
-	main.t_selOptions.arcaderatiomatches = {
-		{['rmin'] = 1, ['rmax'] = 3, ['order'] = 1},
-		{['rmin'] = 3, ['rmax'] = 3, ['order'] = 1},
-		{['rmin'] = 2, ['rmax'] = 2, ['order'] = 1},
-		{['rmin'] = 2, ['rmax'] = 2, ['order'] = 1},
-		{['rmin'] = 1, ['rmax'] = 1, ['order'] = 2},
-		{['rmin'] = 3, ['rmax'] = 3, ['order'] = 1},
-		{['rmin'] = 1, ['rmax'] = 2, ['order'] = 3}
-	}
-end
+	--add default maxmatches / ratiomatches values if config is missing in select.def
+	if main.t_selOptions.arcademaxmatches == nil then main.t_selOptions.arcademaxmatches = {6, 1, 1, 0, 0, 0, 0, 0, 0, 0} end
+	if main.t_selOptions.teammaxmatches == nil then main.t_selOptions.teammaxmatches = {4, 1, 1, 0, 0, 0, 0, 0, 0, 0} end
+	if main.t_selOptions.timeattackmaxmatches == nil then main.t_selOptions.timeattackmaxmatches = {6, 1, 1, 0, 0, 0, 0, 0, 0, 0} end
+	if main.t_selOptions.survivalmaxmatches == nil then main.t_selOptions.survivalmaxmatches = {-1, 0, 0, 0, 0, 0, 0, 0, 0, 0} end
+	if main.t_selOptions.arcaderatiomatches == nil then
+		main.t_selOptions.arcaderatiomatches = {
+			{['rmin'] = 1, ['rmax'] = 3, ['order'] = 1},
+			{['rmin'] = 3, ['rmax'] = 3, ['order'] = 1},
+			{['rmin'] = 2, ['rmax'] = 2, ['order'] = 1},
+			{['rmin'] = 2, ['rmax'] = 2, ['order'] = 1},
+			{['rmin'] = 1, ['rmax'] = 1, ['order'] = 2},
+			{['rmin'] = 3, ['rmax'] = 3, ['order'] = 1},
+			{['rmin'] = 1, ['rmax'] = 2, ['order'] = 3}
+		}
+	end
 
---add excluded characters once all slots are filled
-for i = #main.t_selGrid, (motif.select_info.rows + motif.select_info.rows_scrolling) * motif.select_info.columns - 1 do
-	chars = chars + 1
-	main.t_selChars[chars] = {}
-	table.insert(main.t_selGrid, {['chars'] = {}, ['slot'] = 1})
-	addChar('dummyChar')
-end
-for i = 1, #t_addExluded do
-	chars = chars + 1
-	main.f_addChar(t_addExluded[i], chars, true)
-end
+	--add excluded characters once all slots are filled
+	for i = #main.t_selGrid, (motif.select_info.rows + motif.select_info.rows_scrolling) * motif.select_info.columns - 1 do
+		chars = chars + 1
+		main.t_selChars[chars] = {}
+		table.insert(main.t_selGrid, {['chars'] = {}, ['slot'] = 1})
+		addChar('dummyChar')
+	end
+	for i = 1, #t_addExluded do
+		chars = chars + 1
+		main.f_addChar(t_addExluded[i], chars, true)
+	end
 
---add Training by stupa if not included in select.def
-if main.t_charDef[config.TrainingChar] == nil then
-	chars = chars + 1
-	main.f_addChar(config.TrainingChar .. ', exclude = 1', chars, false)
-end
+	--add Training by stupa if not included in select.def
+	if main.t_charDef[config.TrainingChar] == nil then
+		chars = chars + 1
+		main.f_addChar(config.TrainingChar .. ', exclude = 1', chars, false)
+	end
 
---add remaining character parameters
-main.t_randomChars = {}
---for each character loaded
-for i = 1, #main.t_selChars do
-	--change character 'rivals' param char and stage string file paths to reference values
-	if main.t_selChars[i].rivals ~= nil then
-		for _, v in pairs(main.t_selChars[i].rivals) do
-			--add 'rivals' param character if needed or reference existing one
-			if v.char ~= nil then
-				if main.t_charDef[v.char:lower()] == nil then --new char
-					chars = chars + 1
-					if main.f_addChar(v.char .. ', exclude = 1', chars, false) then
-						v.char_ref = chars - 1
-					else
-						main.f_warning(main.f_extractText(v.char .. motif.warning_info.text_rivals_text), motif.title_info, motif.titlebgdef)
-						v.char = nil
+	--add remaining character parameters
+	main.t_randomChars = {}
+	--for each character loaded
+	for i = 1, #main.t_selChars do
+		--change character 'rivals' param char and stage string file paths to reference values
+		if main.t_selChars[i].rivals ~= nil then
+			for _, v in pairs(main.t_selChars[i].rivals) do
+				--add 'rivals' param character if needed or reference existing one
+				if v.char ~= nil then
+					if main.t_charDef[v.char:lower()] == nil then --new char
+						chars = chars + 1
+						if main.f_addChar(v.char .. ', exclude = 1', chars, false) then
+							v.char_ref = chars - 1
+						else
+							main.f_warning(main.f_extractText(v.char .. motif.warning_info.text_rivals_text), motif.title_info, motif.titlebgdef)
+							v.char = nil
+						end
+					else --already added
+						v.char_ref = main.t_charDef[v.char:lower()]
+					end
+				end
+				--add 'rivals' param stages if needed or reference existing ones
+				if v.stage ~= nil then
+					for k = 1, #v.stage do
+						if main.t_stageDef[v.stage[k]:lower()] == nil then
+							v.stage[k] = main.f_addStage(v.stage[k])
+						else --already added
+							v.stage[k] = main.t_stageDef[v.stage[k]:lower()]
+						end
+					end
+				end
+			end
+		end
+		--character stage param
+		if main.t_selChars[i].stage ~= nil then
+			for j, v in ipairs(main.t_selChars[i].stage) do
+				--add 'stage' param stages if needed or reference existing ones
+				if main.t_stageDef[v:lower()] == nil then
+					main.t_selChars[i].stage[j] = main.f_addStage(v)
+					if main.t_selChars[i].includestage == nil or main.t_selChars[i].includestage == 1 then --stage available all the time
+						table.insert(main.t_includeStage[1], main.t_selChars[i].stage[j])
+						table.insert(main.t_includeStage[2], main.t_selChars[i].stage[j])
+					elseif main.t_selChars[i].includestage == -1 then --excluded stage that can be still manually selected
+						table.insert(main.t_includeStage[2], main.t_selChars[i].stage[j])
 					end
 				else --already added
-					v.char_ref = main.t_charDef[v.char:lower()]
-				end
-			end
-			--add 'rivals' param stages if needed or reference existing ones
-			if v.stage ~= nil then
-				for k = 1, #v.stage do
-					if main.t_stageDef[v.stage[k]:lower()] == nil then
-						v.stage[k] = main.f_addStage(v.stage[k])
-					else --already added
-						v.stage[k] = main.t_stageDef[v.stage[k]:lower()]
-					end
+					main.t_selChars[i].stage[j] = main.t_stageDef[v:lower()]
 				end
 			end
 		end
-	end
-	--character stage param
-	if main.t_selChars[i].stage ~= nil then
-		for j, v in ipairs(main.t_selChars[i].stage) do
-			--add 'stage' param stages if needed or reference existing ones
-			if main.t_stageDef[v:lower()] == nil then
-				main.t_selChars[i].stage[j] = main.f_addStage(v)
-				if main.t_selChars[i].includestage == nil or main.t_selChars[i].includestage == 1 then --stage available all the time
-					table.insert(main.t_includeStage[1], main.t_selChars[i].stage[j])
-					table.insert(main.t_includeStage[2], main.t_selChars[i].stage[j])
-				elseif main.t_selChars[i].includestage == -1 then --excluded stage that can be still manually selected
-					table.insert(main.t_includeStage[2], main.t_selChars[i].stage[j])
-				end
-			else --already added
-				main.t_selChars[i].stage[j] = main.t_stageDef[v:lower()]
+		--if character's name has been stored
+		if main.t_selChars[i].displayname ~= nil then
+			--generate table with characters allowed to be random selected
+			if main.t_selChars[i].playable and (main.t_selChars[i].hidden == nil or main.t_selChars[i].hidden <= 1) and (main.t_selChars[i].exclude == nil or main.t_selChars[i].exclude == 0) then
+				table.insert(main.t_randomChars, i - 1)
 			end
 		end
 	end
-	--if character's name has been stored
-	if main.t_selChars[i].displayname ~= nil then
-		--generate table with characters allowed to be random selected
-		if main.t_selChars[i].playable and (main.t_selChars[i].hidden == nil or main.t_selChars[i].hidden <= 1) and (main.t_selChars[i].exclude == nil or main.t_selChars[i].exclude == 0) then
-			table.insert(main.t_randomChars, i - 1)
+
+	--Save debug tables
+	if main.debugLog then
+		main.f_printTable(main.t_selChars, "debug/t_selChars.txt")
+		main.f_printTable(main.t_selStages, "debug/t_selStages.txt")
+		main.f_printTable(main.t_selOptions, "debug/t_selOptions.txt")
+		main.f_printTable(main.t_orderChars, "debug/t_orderChars.txt")
+		main.f_printTable(main.t_orderStages, "debug/t_orderStages.txt")
+		main.f_printTable(main.t_orderSurvival, "debug/t_orderSurvival.txt")
+		main.f_printTable(main.t_randomChars, "debug/t_randomChars.txt")
+		main.f_printTable(main.t_bossChars, "debug/t_bossChars.txt")
+		main.f_printTable(main.t_bonusChars, "debug/t_bonusChars.txt")
+		main.f_printTable(main.t_stageDef, "debug/t_stageDef.txt")
+		main.f_printTable(main.t_charDef, "debug/t_charDef.txt")
+		main.f_printTable(main.t_includeStage, "debug/t_includeStage.txt")
+		main.f_printTable(main.t_selGrid, "debug/t_selGrid.txt")
+		main.f_printTable(config, "debug/config.txt")
+	end
+
+	--print warning if training character is missing
+	if main.t_charDef[config.TrainingChar] == nil then
+		main.f_warning(main.f_extractText(motif.warning_info.text_training_text), motif.title_info, motif.titlebgdef)
+		os.exit()
+	end
+
+	--print warning if no characters can be randomly chosen
+	if #main.t_randomChars == 0 then
+		main.f_warning(main.f_extractText(motif.warning_info.text_chars_text), motif.title_info, motif.titlebgdef)
+		os.exit()
+	end
+
+	--print warning if no stages have been added
+	if #main.t_includeStage[1] == 0 then
+		main.f_warning(main.f_extractText(motif.warning_info.text_stages_text), motif.title_info, motif.titlebgdef)
+		os.exit()
+	end
+
+	--print warning if at least 1 match is not possible with the current maxmatches settings
+	for k, v in pairs(main.t_selOptions) do
+		local mode = k:match('^(.+)maxmatches$')
+		if mode ~= nil then
+			local orderOK = false
+			for i = 1, #main.t_selOptions[k] do
+				if mode == 'survival' and (main.t_selOptions[k][i] > 0 or main.t_selOptions[k][i] == -1) and main.t_orderSurvival[i] ~= nil and #main.t_orderSurvival[i] > 0 then
+					orderOK = true
+					break
+				elseif main.t_selOptions[k][i] > 0 and main.t_orderChars[i] ~= nil and #main.t_orderChars[i] > 0 then
+					orderOK = true
+					break
+				end
+			end
+			if not orderOK then
+				main.f_warning(main.f_extractText(motif.warning_info.text_order_text), motif.title_info, motif.titlebgdef)
+				os.exit()
+			end
 		end
 	end
 end
 
---Save debug tables
-if main.debugLog then
-	main.f_printTable(main.t_selChars, "debug/t_selChars.txt")
-	main.f_printTable(main.t_selStages, "debug/t_selStages.txt")
-	main.f_printTable(main.t_selOptions, "debug/t_selOptions.txt")
-	main.f_printTable(main.t_orderChars, "debug/t_orderChars.txt")
-	main.f_printTable(main.t_orderStages, "debug/t_orderStages.txt")
-	main.f_printTable(main.t_orderSurvival, "debug/t_orderSurvival.txt")
-	main.f_printTable(main.t_randomChars, "debug/t_randomChars.txt")
-	main.f_printTable(main.t_bossChars, "debug/t_bossChars.txt")
-	main.f_printTable(main.t_bonusChars, "debug/t_bonusChars.txt")
-	main.f_printTable(main.t_stageDef, "debug/t_stageDef.txt")
-	main.f_printTable(main.t_charDef, "debug/t_charDef.txt")
-	main.f_printTable(main.t_includeStage, "debug/t_includeStage.txt")
-	main.f_printTable(main.t_selGrid, "debug/t_selGrid.txt")
-	main.f_printTable(config, "debug/config.txt")
-end
+load_select_def()
 
 --Debug stuff
 loadDebugFont(config.DebugFont)
@@ -1767,45 +1829,6 @@ loadLifebar(motif.files.fight)
 main.timeFramesPerCount = getTimeFramesPerCount()
 main.f_updateRoundsNum()
 main.loadingRefresh(txt_loading)
-
---print warning if training character is missing
-if main.t_charDef[config.TrainingChar] == nil then
-	main.f_warning(main.f_extractText(motif.warning_info.text_training_text), motif.title_info, motif.titlebgdef)
-	os.exit()
-end
-
---print warning if no characters can be randomly chosen
-if #main.t_randomChars == 0 then
-	main.f_warning(main.f_extractText(motif.warning_info.text_chars_text), motif.title_info, motif.titlebgdef)
-	os.exit()
-end
-
---print warning if no stages have been added
-if #main.t_includeStage[1] == 0 then
-	main.f_warning(main.f_extractText(motif.warning_info.text_stages_text), motif.title_info, motif.titlebgdef)
-	os.exit()
-end
-
---print warning if at least 1 match is not possible with the current maxmatches settings
-for k, v in pairs(main.t_selOptions) do
-	local mode = k:match('^(.+)maxmatches$')
-	if mode ~= nil then
-		local orderOK = false
-		for i = 1, #main.t_selOptions[k] do
-			if mode == 'survival' and (main.t_selOptions[k][i] > 0 or main.t_selOptions[k][i] == -1) and main.t_orderSurvival[i] ~= nil and #main.t_orderSurvival[i] > 0 then
-				orderOK = true
-				break
-			elseif main.t_selOptions[k][i] > 0 and main.t_orderChars[i] ~= nil and #main.t_orderChars[i] > 0 then
-				orderOK = true
-				break
-			end
-		end
-		if not orderOK then
-			main.f_warning(main.f_extractText(motif.warning_info.text_order_text), motif.title_info, motif.titlebgdef)
-			os.exit()
-		end
-	end
-end
 
 --uppercase title
 function main.f_itemnameUpper(title, uppercase)
@@ -1822,6 +1845,7 @@ end
 start = require('external.script.start')
 randomtest = require('external.script.randomtest')
 options = require('external.script.options')
+navigation_tip = require('external.script.navigation_tip')
 replay = require('external.script.replay')
 storyboard = require('external.script.storyboard')
 menu = require('external.script.menu')
@@ -2765,7 +2789,7 @@ for i = 1, #main.t_sort.title_info do
 				main.menu.submenu[c] = {title = main.f_itemnameUpper(motif.title_info['menu_itemname_' .. main.t_sort.title_info[i]], motif.title_info.menu_title_uppercase == 1), submenu = {}, items = {}}
 				main.menu.submenu[c].loop = main.createMenu(main.menu.submenu[c], false, false, false, true, true, c == 'serverjoin')
 				if not main.t_sort.title_info[i]:match(c .. '_') then
-					table.insert(main.menu.items, {data = text:create({window = t_menuWindow}), itemname = c, displayname = motif.title_info['menu_itemname_' .. main.t_sort.title_info[i]]})
+					table.insert(main.menu.items, {data = text:create({}), window = t_menuWindow, itemname = c, displayname = motif.title_info['menu_itemname_' .. main.t_sort.title_info[i]]})
 				end
 			end
 			t_pos = main.menu.submenu[c]
@@ -2773,7 +2797,7 @@ for i = 1, #main.t_sort.title_info do
 			if t_pos.submenu[c] == nil then
 				t_pos.submenu[c] = {title = main.f_itemnameUpper(motif.title_info['menu_itemname_' .. main.t_sort.title_info[i]], motif.title_info.menu_title_uppercase == 1), submenu = {}, items = {}}
 				t_pos.submenu[c].loop = main.createMenu(t_pos.submenu[c], false, false, false, true, true, c == 'serverjoin')
-				table.insert(t_pos.items, {data = text:create({window = t_menuWindow}), itemname = c, displayname = motif.title_info['menu_itemname_' .. main.t_sort.title_info[i]]})
+				table.insert(t_pos.items, {data = text:create({}), window = t_menuWindow, itemname = c, displayname = motif.title_info['menu_itemname_' .. main.t_sort.title_info[i]]})
 			end
 			if j > lastNum then
 				t_pos = t_pos.submenu[c]
@@ -2784,13 +2808,13 @@ for i = 1, #main.t_sort.title_info do
 		if main.t_sort.title_info[i]:match('_bonusgames_back$') and c == 'bonusgames' then --j == main.f_countSubstring(main.t_sort.title_info[i], '_') then
 			for k = 1, #main.t_bonusChars do
 				local name = getCharName(main.t_bonusChars[k])
-				table.insert(t_pos.items, {data = text:create({window = t_menuWindow}), itemname = 'bonus_' .. name:gsub('%s+', '_'), displayname = name:upper()})
+				table.insert(t_pos.items, {data = text:create({}), window = t_menuWindow, itemname = 'bonus_' .. name:gsub('%s+', '_'), displayname = name:upper()})
 			end
 		end
 		--add IP addresses for serverjoin submenu
 		if main.t_sort.title_info[i]:match('_serverjoin_back$') and c == 'serverjoin' then --j == main.f_countSubstring(main.t_sort.title_info[i], '_') then
 			for k, v in pairs(config.IP) do
-				table.insert(t_pos.items, {data = text:create({window = t_menuWindow}), itemname = 'ip_' .. k, displayname = k})
+				table.insert(t_pos.items, {data = text:create({}), window = t_menuWindow, itemname = 'ip_' .. k, displayname = k})
 			end
 		end
 	end
@@ -2982,13 +3006,18 @@ function main.f_menuCommonCalc(cursorPosY, moveTxt, item, t, section, keyPrev, k
 	return cursorPosY, moveTxt, item
 end
 
-function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData, section, bgdef, title, dataScale, rectScale, rectFix, t_footer, skipClear)
+function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData, section, bgdef, title, dataScale, rectScale, rectFix, t_footer, skipClear, skipInput, skipBackground)
+	if motif[section].is_absolute == nil then
+		motif[section].is_absolute = false
+	end
 	--draw clearcolor
 	if not skipClear then
 		clearColor(motif[bgdef].bgclearcolor[1], motif[bgdef].bgclearcolor[2], motif[bgdef].bgclearcolor[3])
 	end
 	--draw layerno = 0 backgrounds
-	bgDraw(motif[bgdef].bg, false)
+	if skipBackground ~= true then
+		bgDraw(motif[bgdef].bg, false)
+	end
 	--draw menu box
 	if motif[section].menu_boxbg_visible == 1 then
 		local coord4 = 0
@@ -3012,7 +3041,9 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 		)
 	end
 	--draw title
-	title:draw()
+	if title ~= nil then
+		title:draw()
+	end
 	--draw menu items
 	local items_shown = item + motif[section].menu_window_visibleitems - cursorPosY
 	if items_shown > #t or (motif[section].menu_window_visibleitems > 1 and items_shown < #t and (motif[section].menu_window_margins_y[1] ~= 0 or motif[section].menu_window_margins_y[2] ~= 0)) then
@@ -3020,6 +3051,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 	end
 	for i = 1, items_shown do
 		if i > item - cursorPosY then
+			local special_color = {nil, nil, nil}
+			if t[i].color ~= nil then
+				special_color = t[i].color
+			end
+			local window = nil
+			if t[i].window == nil then
+				window = text:get_default_window(dataScale)
+			else
+				window = t[i].window
+			end
 			if i == item then
 				if t[i].selected then
 					t[i].data:update({
@@ -3031,15 +3072,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 						y =      motif[section].menu_pos[2] + (i - 1) * motif[section].menu_item_spacing[2] - moveTxt,
 						scaleX = motif[section].menu_item_selected_active_font_scale[1],
 						scaleY = motif[section].menu_item_selected_active_font_scale[2],
-						r =      motif[section].menu_item_selected_active_font[4],
-						g =      motif[section].menu_item_selected_active_font[5],
-						b =      motif[section].menu_item_selected_active_font[6],
+						r =      special_color[1] or motif[section].menu_item_selected_active_font[4],
+						g =      special_color[2] or motif[section].menu_item_selected_active_font[5],
+						b =      special_color[3] or motif[section].menu_item_selected_active_font[6],
 						src =    motif[section].menu_item_selected_active_font[7],
 						dst =    motif[section].menu_item_selected_active_font[8],
 						height = motif[section].menu_item_selected_active_font_height,
+						window = window,
 						defsc =  dataScale
 					})
-					t[i].data:draw()
+					t[i].data:draw(motif[section].is_absolute)
 				else
 					t[i].data:update({
 						font =   motif[section].menu_item_active_font[1],
@@ -3050,15 +3092,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 						y =      motif[section].menu_pos[2] + (i - 1) * motif[section].menu_item_spacing[2] - moveTxt,
 						scaleX = motif[section].menu_item_active_font_scale[1],
 						scaleY = motif[section].menu_item_active_font_scale[2],
-						r =      motif[section].menu_item_active_font[4],
-						g =      motif[section].menu_item_active_font[5],
-						b =      motif[section].menu_item_active_font[6],
+						r =      special_color[1] or motif[section].menu_item_active_font[4],
+						g =      special_color[2] or motif[section].menu_item_active_font[5],
+						b =      special_color[3] or motif[section].menu_item_active_font[6],
 						src =    motif[section].menu_item_active_font[7],
 						dst =    motif[section].menu_item_active_font[8],
 						height = motif[section].menu_item_active_font_height,
+						window = window,
 						defsc =  dataScale
 					})
-					t[i].data:draw()
+					t[i].data:draw(motif[section].is_absolute)
 				end
 				if t[i].vardata ~= nil then
 					t[i].vardata:update({
@@ -3070,15 +3113,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 						y =      motif[section].menu_pos[2] + (i - 1) * motif[section].menu_item_spacing[2] - moveTxt,
 						scaleX = motif[section].menu_item_value_active_font_scale[1],
 						scaleY = motif[section].menu_item_value_active_font_scale[2],
-						r =      motif[section].menu_item_value_active_font[4],
-						g =      motif[section].menu_item_value_active_font[5],
-						b =      motif[section].menu_item_value_active_font[6],
+						r =      special_color[1] or motif[section].menu_item_value_active_font[4],
+						g =      special_color[2] or motif[section].menu_item_value_active_font[5],
+						b =      special_color[3] or motif[section].menu_item_value_active_font[6],
 						src =    motif[section].menu_item_value_active_font[7],
 						dst =    motif[section].menu_item_value_active_font[8],
 						height = motif[section].menu_item_value_active_font_height,
+						window = window,
 						defsc =  dataScale
 					})
-					t[i].vardata:draw()
+					t[i].vardata:draw(motif[section].is_absolute)
 				end
 			else
 				if t[i].selected then
@@ -3091,15 +3135,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 						y =      motif[section].menu_pos[2] + (i - 1) * motif[section].menu_item_spacing[2] - moveTxt,
 						scaleX = motif[section].menu_item_selected_font_scale[1],
 						scaleY = motif[section].menu_item_selected_font_scale[2],
-						r =      motif[section].menu_item_selected_font[4],
-						g =      motif[section].menu_item_selected_font[5],
-						b =      motif[section].menu_item_selected_font[6],
+						r =      special_color[1] or motif[section].menu_item_selected_font[4],
+						g =      special_color[2] or motif[section].menu_item_selected_font[5],
+						b =      special_color[3] or motif[section].menu_item_selected_font[6],
 						src =    motif[section].menu_item_selected_font[7],
 						dst =    motif[section].menu_item_selected_font[8],
 						height = motif[section].menu_item_selected_font_height,
+						window = window,
 						defsc =  dataScale
 					})
-					t[i].data:draw()
+					t[i].data:draw(motif[section].is_absolute)
 				else
 					t[i].data:update({
 						font =   motif[section].menu_item_font[1],
@@ -3110,15 +3155,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 						y =      motif[section].menu_pos[2] + (i - 1) * motif[section].menu_item_spacing[2] - moveTxt,
 						scaleX = motif[section].menu_item_font_scale[1],
 						scaleY = motif[section].menu_item_font_scale[2],
-						r =      motif[section].menu_item_font[4],
-						g =      motif[section].menu_item_font[5],
-						b =      motif[section].menu_item_font[6],
+						r =      special_color[1] or motif[section].menu_item_font[4],
+						g =      special_color[2] or motif[section].menu_item_font[5],
+						b =      special_color[3] or motif[section].menu_item_font[6],
 						src =    motif[section].menu_item_font[7],
 						dst =    motif[section].menu_item_font[8],
 						height = motif[section].menu_item_font_height,
+						window = window,
 						defsc =  dataScale
 					})
-					t[i].data:draw()
+					t[i].data:draw(motif[section].is_absolute)
 				end
 				if t[i].vardata ~= nil then
 					t[i].vardata:update({
@@ -3130,15 +3176,16 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 						y =      motif[section].menu_pos[2] + (i - 1) * motif[section].menu_item_spacing[2] - moveTxt,
 						scaleX = motif[section].menu_item_value_font_scale[1],
 						scaleY = motif[section].menu_item_value_font_scale[2],
-						r =      motif[section].menu_item_value_font[4],
-						g =      motif[section].menu_item_value_font[5],
-						b =      motif[section].menu_item_value_font[6],
+						r =      special_color[1] or motif[section].menu_item_value_font[4],
+						g =      special_color[2] or motif[section].menu_item_value_font[5],
+						b =      special_color[3] or motif[section].menu_item_value_font[6],
 						src =    motif[section].menu_item_value_font[7],
 						dst =    motif[section].menu_item_value_font[8],
 						height = motif[section].menu_item_value_font_height,
+						window = window,
 						defsc =  dataScale
 					})
-					t[i].vardata:draw()
+					t[i].vardata:draw(motif[section].is_absolute)
 				end
 			end
 		end
@@ -3179,7 +3226,9 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 		end
 	end
 	--draw layerno = 1 backgrounds
-	bgDraw(motif[bgdef].bg, true)
+	if skipBackground ~= true then
+		bgDraw(motif[bgdef].bg, true)
+	end
 	--footer draw
 	if motif[section].footer_boxbg_visible == 1 then
 		fillRect(
@@ -3199,15 +3248,19 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 	for i = 1, #t_footer do
 		t_footer[i]:draw()
 	end
-	--draw fadein / fadeout
-	main.fadeActive = fadeColor(
-		fadeType,
-		main.fadeStart,
-		motif[fadeData][fadeType .. '_time'],
-		motif[fadeData][fadeType .. '_col'][1],
-		motif[fadeData][fadeType .. '_col'][2],
-		motif[fadeData][fadeType .. '_col'][3]
-	)
+
+	if motif[fadeData][fadeType .. "_time"] ~= nil then
+		--draw fadein / fadeout
+		main.fadeActive = fadeColor(
+			fadeType,
+			main.fadeStart,
+			motif[fadeData][fadeType .. '_time'],
+			motif[fadeData][fadeType .. '_col'][1],
+			motif[fadeData][fadeType .. '_col'][2],
+			motif[fadeData][fadeType .. '_col'][3]
+		)
+	end
+
 	--frame transition
 	if main.fadeActive then
 		commandBufReset(main.t_cmd[1])
@@ -3217,7 +3270,9 @@ function main.f_menuCommonDraw(cursorPosY, moveTxt, item, t, fadeType, fadeData,
 		commandBufReset(main.t_cmd[2])
 		return --skip last frame rendering
 	else
-		main.f_cmdInput()
+		if skipInput ~= true then
+			main.f_cmdInput()
+		end
 	end
 	if not skipClear then
 		refresh()

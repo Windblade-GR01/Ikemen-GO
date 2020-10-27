@@ -1292,6 +1292,76 @@ local motif =
 		cursor_done_snd = {100, 1},
 		cancel_snd = {100, 2},
 	},
+	character_edit_info =
+	{
+		--TODO: remove unused content
+		menu_pos = {85, 33}, --Ikemen feature
+		is_absolute = true,
+		menu_item_font = {'f-6x9.def', 0, 1, 191, 191, 191, 255, 0}, --Ikemen feature
+		menu_item_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_font_height = -1, --Ikemen feature
+		menu_item_active_font = {'f-6x9.def', 0, 1, 255, 255, 255, 255, 0}, --Ikemen feature
+		menu_item_active_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_active_font_height = -1, --Ikemen feature
+		menu_item_selected_font = {'f-6x9.def', 0, 1, 0, 247, 247, 255, 0}, --Ikemen feature
+		menu_item_selected_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_selected_font_height = -1, --Ikemen feature
+		menu_item_selected_active_font = {'f-6x9.def', 0, 1, 0, 247, 247, 255, 0}, --Ikemen feature
+		menu_item_selected_active_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_selected_active_font_height = -1, --Ikemen feature
+		menu_item_value_font = {'f-6x9.def', 0, -1, 191, 191, 191, 255, 0}, --Ikemen feature
+		menu_item_value_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_value_font_height = -1, --Ikemen feature
+		menu_item_value_active_font = {'f-6x9.def', 0, -1, 255, 255, 255, 255, 0}, --Ikemen feature
+		menu_item_value_active_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_value_active_font_height = -1, --Ikemen feature
+		menu_item_value_conflict_font = {'f-6x9.def', 0, -1, 247, 0, 0, 255, 0}, --Ikemen feature
+		menu_item_value_conflict_font_scale = {heightscale(), heightscale()}, --Ikemen feature
+		menu_item_value_conflict_font_height = -1, --Ikemen feature
+		menu_item_spacing = {150*heightscale(), 13*heightscale()}, --Ikemen feature
+		menu_window_margins_y = {0, 0}, --Ikemen feature
+		menu_window_visibleitems = 16, --Ikemen feature
+		--menu_arrow_up_anim = nil, --Ikemen feature
+		menu_arrow_up_spr = {}, --Ikemen feature
+		menu_arrow_up_offset = {0, 0}, --Ikemen feature
+		menu_arrow_up_facing = 1, --Ikemen feature
+		menu_arrow_up_scale = {1.0, 1.0}, --Ikemen feature
+		--menu_arrow_down_anim = nil, --Ikemen feature
+		menu_arrow_down_spr = {}, --Ikemen feature
+		menu_arrow_down_offset = {0, 0}, --Ikemen feature
+		menu_arrow_down_facing = 1, --Ikemen feature
+		menu_arrow_down_scale = {1.0, 1.0}, --Ikemen feature
+		menu_boxcursor_visible = 1, --Ikemen feature
+		menu_boxcursor_coords = {-5*heightscale(), -10*heightscale(), 154*heightscale(), 2*heightscale()}, --Ikemen feature
+		menu_boxcursor_col = {255, 255, 255}, --Ikemen feature
+		menu_boxcursor_alpharange = {10, 40, 2, 255, 255, 0}, --Ikemen feature
+		menu_boxbg_visible = 1, --Ikemen feature
+		menu_boxbg_col = {0, 0, 0}, --Ikemen feature
+		menu_boxbg_alpha = {20, 100}, --Ikemen feature
+		menu_item_info_font = {'f-6x9.def', 0, -1, 247, 247, 0, 255, 0}, --Ikemen feature
+		menu_item_info_font_scale = {1.0, 1.0}, --Ikemen feature
+		menu_item_info_font_height = -1, --Ikemen feature
+		menu_item_info_active_font = {'f-6x9.def', 0, -1, 247, 247, 0, 255, 0}, --Ikemen feature
+		menu_item_info_active_font_scale = {1.0, 1.0}, --Ikemen feature
+		menu_item_info_active_font_height = -1, --Ikemen feature
+		cursor_move_snd = {100, 0},
+		cursor_done_snd = {100, 1},
+		cancel_snd = {100, 2},
+		text_character_enabled = "enabled",
+		text_character_disabled = "disabled",
+		text_default = "default",
+		text_this_ai_level = "this ai level",
+		text_return = "return"
+	},
+	navigation_tip = {
+		tip_font = {'f-6x9.def', 0, 1, 210, 210, 210, 255, 0}, --Ikemen feature
+		tip_font_scale = {widthscale(), widthscale()}, --Ikemen feature
+		tip_background = {0, 0, 0, 0, 100}, --Ikemen feature
+		tip_font_height = widthscale()*8, --Ikemen feature
+		tip_font_lower_diff = - widthscale()*1, --Ikemen feature
+		tip_extra_space_bottom = heightscale()*3, --Ikemen feature
+		tip_extra_space_top = heightscale()*3 --Ikemen feature
+	},
 	optionbgdef =
 	{
 		spr = '',
@@ -1689,6 +1759,7 @@ function motif.setBaseOptionInfo()
 
 	motif.option_info.menu_itemname_empty = ""
 	motif.option_info.menu_itemname_portchange = "Port Change"
+	motif.option_info_menu_itemname_characters = "Manage Characters"
 	motif.option_info.menu_itemname_default = "Default Values"
 	motif.option_info.menu_itemname_empty = ""
 	motif.option_info.menu_itemname_savereturn = "Save and Return"
@@ -1793,6 +1864,7 @@ function motif.setBaseOptionInfo()
 		"menuengine_back",
 		"empty",
 		"portchange",
+		"characters",
 		"default",
 		"empty",
 		"savereturn",

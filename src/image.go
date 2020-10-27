@@ -1055,18 +1055,26 @@ func (s *Sprite) glDraw(pal []uint32, mask int32, x, y float32, tile *[4]int32,
 		}
 	}
 }
-func (s *Sprite) Draw(x, y, xscale, yscale float32, pal []uint32, fx *PalFX, paltex *Texture, window *[4]int32) {
-	x += float32(sys.gameWidth-320)/2 - xscale*float32(s.Offset[0])
-	y += float32(sys.gameHeight-240) - yscale*float32(s.Offset[1])
+func (s *Sprite) Draw(x, y, xscale, yscale float32, pal []uint32, fx *PalFX, paltex *Texture, window *[4]int32, scale bool) {
+	if scale {
+		x += float32(sys.gameWidth-320)/2 - xscale*float32(s.Offset[0])
+		y += float32(sys.gameHeight-240) - yscale*float32(s.Offset[1])
+	}
 	if xscale < 0 {
 		x *= -1
 	}
 	if yscale < 0 {
 		y *= -1
 	}
-	s.glDraw(pal, 0, -x*sys.widthScale, -y*sys.heightScale, &notiling,
-		xscale*sys.widthScale, xscale*sys.widthScale, yscale*sys.heightScale, 0, 0, 0, 0,
-		sys.brightness*255>>8|1<<9, window, 0, 0, fx, paltex)
+	if scale {
+		s.glDraw(pal, 0, -x*sys.widthScale, -y*sys.heightScale, &notiling,
+			xscale*sys.widthScale, xscale*sys.widthScale, yscale*sys.heightScale, 0, 0, 0, 0,
+			sys.brightness*255>>8|1<<9, window, 0, 0, fx, paltex)
+	} else {
+		s.glDraw(pal, 0, -x, -y, &notiling,
+			xscale, xscale, yscale, 0, 0, 0, 0,
+			sys.brightness*255>>8|1<<9, window, 0, 0, fx, paltex)
+	}
 }
 
 type Sff struct {

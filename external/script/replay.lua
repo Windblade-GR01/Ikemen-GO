@@ -38,11 +38,11 @@ function replay.f_replay()
 			path = path:gsub('\\', '/')
 			ext = ext:lower()
 			if ext == 'replay' then
-				table.insert(t, {data = text:create({window = t_menuWindow}), itemname = path .. filename .. '.' .. ext, displayname = filename})
+				table.insert(t, {data = text:create({}), window = t_menuWindow, itemname = path .. filename .. '.' .. ext, displayname = filename})
 			end
 		end)
 	end
-	table.insert(t, {data = text:create({window = t_menuWindow}), itemname = 'back', displayname = motif.replay_info.menu_itemname_back})
+	table.insert(t, {data = text:create({}), window = t_menuWindow, itemname = 'back', displayname = motif.replay_info.menu_itemname_back})
 	main.f_bgReset(motif.replaybgdef.bg)
 	main.f_playBGM(false, motif.music.replay_bgm, motif.music.replay_bgm_loop, motif.music.replay_bgm_volume, motif.music.replay_bgm_loopstart, motif.music.replay_bgm_loopend)
 	while true do

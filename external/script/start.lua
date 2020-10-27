@@ -1198,29 +1198,33 @@ function start.f_faceOffset(col, row, key)
 	return 0
 end
 
---
-local cnt = motif.select_info.columns + 1
-local row = 1
-local col = 0
-start.t_grid = {[row] = {}}
-for i = 1, (motif.select_info.rows + motif.select_info.rows_scrolling) * motif.select_info.columns do
-	if i == cnt then
-		row = row + 1
-		cnt = cnt + motif.select_info.columns
-		start.t_grid[row] = {}
+-- set start.t_grid, with adjancement of character in the select screen
+function start.f_generateGrid()
+	local cnt = motif.select_info.columns + 1
+	local row = 1
+	local col = 0
+	start.t_grid = {[row] = {}}
+	for i = 1, (motif.select_info.rows + motif.select_info.rows_scrolling) * motif.select_info.columns do
+		if i == cnt then
+			row = row + 1
+			cnt = cnt + motif.select_info.columns
+			start.t_grid[row] = {}
+		end
+		col = #start.t_grid[row] + 1
+		start.t_grid[row][col] = {
+			x = (col - 1) * (motif.select_info.cell_size[1] + motif.select_info.cell_spacing[1]) + start.f_faceOffset(col, row, 1),
+			y = (row - 1) * (motif.select_info.cell_size[2] + motif.select_info.cell_spacing[2]) + start.f_faceOffset(col, row, 2)
+		}
+		if start.f_selGrid(i).char ~= nil then
+			start.t_grid[row][col].char = start.f_selGrid(i).char
+			start.t_grid[row][col].char_ref = start.f_selGrid(i).char_ref
+			start.t_grid[row][col].hidden = start.f_selGrid(i).hidden
+		end
 	end
-	col = #start.t_grid[row] + 1
-	start.t_grid[row][col] = {
-		x = (col - 1) * (motif.select_info.cell_size[1] + motif.select_info.cell_spacing[1]) + start.f_faceOffset(col, row, 1),
-		y = (row - 1) * (motif.select_info.cell_size[2] + motif.select_info.cell_spacing[2]) + start.f_faceOffset(col, row, 2)
-	}
-	if start.f_selGrid(i).char ~= nil then
-		start.t_grid[row][col].char = start.f_selGrid(i).char
-		start.t_grid[row][col].char_ref = start.f_selGrid(i).char_ref
-		start.t_grid[row][col].hidden = start.f_selGrid(i).hidden
-	end
+	if main.debugLog then main.f_printTable(start.t_grid, 'debug/t_grid.txt') end
 end
-if main.debugLog then main.f_printTable(start.t_grid, 'debug/t_grid.txt') end
+
+start.f_generateGrid()
 
 --return formatted clear time string
 function start.f_clearTimeText(text, totalSec)

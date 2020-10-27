@@ -5,6 +5,8 @@ local options = {}
 local modified = false
 local needReload = false
 
+require("external.script.option_select")
+
 --return string depending on bool
 function options.f_boolDisplay(bool, t, f)
 	t = t or motif.option_info.menu_valuename_yes
@@ -29,12 +31,110 @@ function options.f_precision(v, decimal)
 	return tonumber(string.format(decimal, v))
 end
 
+-- change the numerical value "data" if left or right are pressed, with the minimal and maximal value "min" and "max" (wrapping).
+-- also, "min" or (exclusive) "max" can be nil to indicate they can go up to an infinite/negative infinite value (disable wrapping in this case).
+-- if accept_nil is set to true, then the value can also be set by the user to nil
+-- audio_value is a list with two parameter for changed sound (can be nil for no sound)
+-- step is the value that will be changed for each keypresses
+--
+-- return the new value and if the value has changed in this frame
+function options.option_numerical_plage(data, min, max, audio_value, accept_nil, step)
+	if min == nil and max == nil then
+		print("options.option_numerical_plage called with min and max both nil. Expect unexpected comportement")
+	end
+	if step == nil then step = 1 end
+	if accept_nil ~= true and data == nil then
+		data = min
+	end
+	local changed = false
+	if main.f_input(main.t_players, {'$F'}) then
+		changed = true
+		if data == nil and min ~= nil then
+			data = min
+		else
+			data = data + step
+			if max ~= nil then
+				if data > max then
+					if accept_nil then
+						data = nil
+					else
+						if min == nil then
+							data = max
+						else
+							data = min
+						end
+					end
+				end
+			end
+		end
+	elseif main.f_input(main.t_players, {'$B'}) then
+		changed = true
+		if data == nil and max ~= nil then
+			data = max
+		else
+			data = data - step
+			if min ~= nil then
+				if data < min then
+					if accept_nil then
+						data = nil
+					else
+						if max == nil then
+							data = min
+						else
+							data = max
+						end
+					end
+				end
+			end
+		end
+	end
+	if changed then
+		if audio_value ~= nil then
+			sndPlay(motif.files.snd_data, audio_value[1], audio_value[2])
+		end
+	end
+	return data, changed
+end
+
 --save configuration
 function options.f_saveCfg(reload)
 	--Data saving to config.json
 	local file = io.open(main.flags['-config'], 'w+')
 	file:write(json.encode(config, {indent = true}))
 	file:close()
+
+	-- save change to select.def
+	if option_select.select_characters ~= nil then
+		local need_to_save_select = false
+		for k, v in ipairs(option_select.select_characters) do
+			if v["changed"] == true then
+				local chara_definition = file_def.rebuild_char(v)
+				if v.line == nil then
+					local new_line = {kind = "empty", initial_whitespace = ""}
+					table.insert(option_select.select_lines, option_select.last_character_line, new_line)
+					option_select.last_character_line = option_select.last_character_line + 1
+					v.line = new_line
+				end
+				if v.user_enabled == true then
+					v.line.kind = "data"
+					v.line.data = chara_definition
+				else
+					v.line.kind = "empty"
+					v.line.have_comment = true
+					v.line.comment = "CHARDISABLED:" .. chara_definition
+				end
+				need_to_save_select = true
+			end
+		end
+
+		if need_to_save_select then
+			local select_compiled = file_def.rebuild_source_file(option_select.select_lines)
+			local file = io.open(motif.files.select, 'w+')
+			file:write(select_compiled)
+			file:close()
+		end
+	end
+
 	--Reload game if needed
 	if reload then
 		main.f_warning(main.f_extractText(motif.warning_info.text_reload_text), motif.option_info, motif.optionbgdef)
@@ -159,6 +259,15 @@ options.t_itemname = {
 			else
 				sndPlay(motif.files.snd_data, motif.option_info.cancel_snd[1], motif.option_info.cancel_snd[2])
 			end
+		end
+		return true
+	end,
+	-- characters management
+	['characters'] = function(cursorPosY, moveTxt, item, t)
+		if main.f_input(main.t_players, {'$F', '$B', 'pal', 's'}) then
+			option_select.f_loop_character_edit()
+			--TODO: let option_select.f_loop_character_edit control if modified should be set
+			modified = true
 		end
 		return true
 	end,
@@ -288,6 +397,9 @@ options.t_itemname = {
 			if modified then
 				options.f_saveCfg(needReload)
 			end
+
+			option_select.reload_base_character()
+
 			main.f_menuFade('option_info', 'fadeout', cursorPosY, moveTxt, item, t.items)
 			main.f_bgReset(motif.titlebgdef.bg)
 			if motif.music.option_bgm ~= '' then
@@ -304,6 +416,9 @@ options.t_itemname = {
 			if needReload then
 				main.f_warning(main.f_extractText(motif.warning_info.text_noreload_text), motif.option_info, motif.optionbgdef)
 			end
+
+			option_select.reload_base_character()
+
 			main.f_menuFade('option_info', 'fadeout', cursorPosY, moveTxt, item, t.items)
 			main.f_bgReset(motif.titlebgdef.bg)
 			if motif.music.option_bgm ~= '' then
@@ -315,97 +430,58 @@ options.t_itemname = {
 	end,
 	--Time Limit
 	['roundtime'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.RoundTime < 1000 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.RoundTime = config.RoundTime + 1
-			t.items[item].vardisplay = config.RoundTime
+		config.RoundTime, changed = options.option_numerical_plage(config.RoundTime, -1, 1000, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.RoundTime > -1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.RoundTime = config.RoundTime - 1
 			t.items[item].vardisplay = options.f_definedDisplay(config.RoundTime, {[-1] = motif.option_info.menu_valuename_none}, config.RoundTime)
-			modified = true
 		end
 		return true
 	end,
 	--Rounds to Win Single
 	['roundsnumsingle'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and main.roundsNumSingle < 10 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			main.roundsNumSingle = main.roundsNumSingle + 1
+		main.roundsNumSingle, changed = options.option_numerical_plage(main.roundsNumSingle, 1, 10, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = main.roundsNumSingle
 			config.RoundsNumSingle = main.roundsNumSingle
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and main.roundsNumSingle > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			main.roundsNumSingle = main.roundsNumSingle - 1
-			t.items[item].vardisplay = main.roundsNumSingle
-			config.RoundsNumSingle = main.roundsNumSingle
-			modified = true
 		end
 		return true
 	end,
 	--Rounds to Win Simul/Tag
 	['roundsnumteam'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and main.roundsNumTeam < 10 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			main.roundsNumTeam = main.roundsNumTeam + 1
+		main.roundsNumTeam, changed = options.option_numerical_plage(main.roundsNumTeam, 1, 10, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = main.roundsNumTeam
 			config.RoundsNumTeam = main.roundsNumTeam
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and main.roundsNumTeam > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			main.roundsNumTeam = main.roundsNumTeam - 1
-			t.items[item].vardisplay = main.roundsNumTeam
-			config.RoundsNumTeam = main.roundsNumTeam
-			modified = true
 		end
 		return true
 	end,
 	--Max Draw Games
 	['maxdrawgames'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and main.maxDrawGames < 10 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			main.maxDrawGames = main.maxDrawGames + 1
+		main.maxDrawGames, changed = options.option_numerical_plage(main.maxDrawGames, -1, 10, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = main.maxDrawGames
 			config.MaxDrawGames = main.maxDrawGames
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and main.maxDrawGames > -1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			main.maxDrawGames = main.maxDrawGames - 1
-			t.items[item].vardisplay = main.maxDrawGames
-			config.MaxDrawGames = main.maxDrawGames
-			modified = true
 		end
 		return true
 	end,
 	--Difficulty Level
 	['difficulty'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.Difficulty < 8 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.Difficulty = config.Difficulty + 1
-			t.items[item].vardisplay = config.Difficulty
+		config.Difficulty, changed = options.option_numerical_plage(config.Difficulty, 1, 8, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.Difficulty > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.Difficulty = config.Difficulty - 1
 			t.items[item].vardisplay = config.Difficulty
-			modified = true
 		end
 		return true
 	end,
 	--Credits
 	['credits'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.Credits < 99 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.Credits = config.Credits + 1
-			t.items[item].vardisplay = config.Credits
+		config.Credits, changed = options.option_numerical_plage(config.Credits, 1, 99, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.Credits > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.Credits = config.Credits - 1
 			t.items[item].vardisplay = config.Credits
-			modified = true
 		end
 		return true
 	end,
@@ -585,52 +661,31 @@ options.t_itemname = {
 	end,
 	--Master Volume
 	['mastervolume'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.VolumeMaster < 200 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.VolumeMaster = config.VolumeMaster + 1
+		config.VolumeMaster, changed = options.option_numerical_plage(config.VolumeMaster, 0, 200, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = config.VolumeMaster .. '%'
 			setVolumeMaster(config.VolumeMaster)
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.VolumeMaster > 0 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.VolumeMaster = config.VolumeMaster - 1
-			t.items[item].vardisplay = config.VolumeMaster  .. '%'
-			setVolumeMaster(config.VolumeMaster)
-			modified = true
 		end
 		return true
 	end,
 	--BGM Volume
 	['bgmvolume'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.VolumeBgm < 100 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.VolumeBgm = config.VolumeBgm + 1
-			t.items[item].vardisplay = config.VolumeBgm .. '%'
-			setVolumeBgm(config.VolumeBgm)
+		config.VolumeBgm, changed = options.option_numerical_plage(config.VolumeBgm, 0, 100, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.VolumeBgm > 0 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.VolumeBgm = config.VolumeBgm - 1
 			t.items[item].vardisplay = config.VolumeBgm .. '%'
-			setVolumeBgm(config.VolumeBgm)
-			modified = true
+			setVolumeBgm(config.VolumeMaster)
 		end
 		return true
 	end,
 	--SFX Volume
 	['sfxvolume'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.VolumeSfx < 100 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.VolumeSfx = config.VolumeSfx + 1
+		config.VolumeSfx, changed = options.option_numerical_plage(config.VolumeSfx, 0, 100, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = config.VolumeSfx .. '%'
 			setVolumeSfx(config.VolumeSfx)
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.VolumeSfx > 0 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.VolumeSfx = config.VolumeSfx - 1
-			t.items[item].vardisplay = config.VolumeSfx .. '%'
-			setVolumeSfx(config.VolumeSfx)
-			modified = true
 		end
 		return true
 	end,
@@ -651,35 +706,21 @@ options.t_itemname = {
 	end,
 	--Life
 	['lifemul'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.LifeMul < 300 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.LifeMul = config.LifeMul + 10
-			setLifeMul(config.LifeMul / 100)
-			t.items[item].vardisplay = config.LifeMul .. '%'
+		config.LifeMul, changed = options.option_numerical_plage(config.LifeMul, 10, 300, motif.option_info.cursor_move_snd, nil, 10)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.LifeMul > 10 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.LifeMul = config.LifeMul - 10
-			setLifeMul(config.LifeMul / 100)
 			t.items[item].vardisplay = config.LifeMul .. '%'
-			modified = true
+			setLifeMul(config.LifeMul / 100)
 		end
 		return true
 	end,
 	--Game Speed
 	['gamespeed'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.GameSpeed < 200 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.GameSpeed = config.GameSpeed + 1
-			setGameSpeed(config.GameSpeed / 100)
-			t.items[item].vardisplay = config.GameSpeed .. '%'
+		config.GameSpeed, changed = options.option_numerical_plage(config.GameSpeed, 10, 200, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.GameSpeed > 10 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.GameSpeed = config.GameSpeed - 1
-			setGameSpeed(config.GameSpeed / 100)
 			t.items[item].vardisplay = config.GameSpeed .. '%'
-			modified = true
+			setGameSpeed(config.GameSpeed / 100)
 		end
 		return true
 	end,
@@ -741,18 +782,11 @@ options.t_itemname = {
 	end,
 	--Single VS Team Life
 	['singlevsteamlife'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.SingleVsTeamLife < 300 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.SingleVsTeamLife = config.SingleVsTeamLife + 10
-			setSingleVsTeamLife(config.SingleVsTeamLife / 100)
-			t.items[item].vardisplay = config.SingleVsTeamLife .. '%'
+		config.SingleVsTeamLife, changed = options.option_numerical_plage(config.SingleVsTeamLife, 10, 300, motif.option_info.cursor_move_snd, nil, 10)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.SingleVsTeamLife > 10 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.SingleVsTeamLife = config.SingleVsTeamLife - 10
-			setSingleVsTeamLife(config.SingleVsTeamLife / 100)
 			t.items[item].vardisplay = config.SingleVsTeamLife .. '%'
-			modified = true
+			setSingleVsTeamLife(config.SingleVsTeamLife / 100)
 		end
 		return true
 	end,
@@ -819,125 +853,75 @@ options.t_itemname = {
 	end,
 	--Turns Recovery Base
 	['turnsrecoverybase'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.TurnsRecoveryBase < 100 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.TurnsRecoveryBase = config.TurnsRecoveryBase + 0.5
-			setTurnsRecoveryBase(config.TurnsRecoveryBase / 100)
-			t.items[item].vardisplay = config.TurnsRecoveryBase .. '%'
+		config.TurnsRecoveryBase, changed = options.option_numerical_plage(config.TurnsRecoveryBase, 0, 100, motif.option_info.cursor_move_snd, nil, 0.5)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.TurnsRecoveryBase > 0 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.TurnsRecoveryBase = config.TurnsRecoveryBase - 0.5
-			setTurnsRecoveryBase(config.TurnsRecoveryBase / 100)
 			t.items[item].vardisplay = config.TurnsRecoveryBase .. '%'
-			modified = true
+			setTurnsRecoveryBase(config.TurnsRecoveryBase / 100)
 		end
 		return true
 	end,
 	--Turns Recovery Bonus
 	['turnsrecoverybonus'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.TurnsRecoveryBonus < 100 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.TurnsRecoveryBonus = config.TurnsRecoveryBonus + 0.5
+		config.TurnsRecoveryBonus, changed = options.option_numerical_plage(config.TurnsRecoveryBonus, 0, 100, motif.option_info.cursor_move_snd, nil, 0.5)
+		if changed then
+			modified = true
 			setTurnsRecoveryBonus(config.TurnsRecoveryBonus / 100)
 			t.items[item].vardisplay = config.TurnsRecoveryBonus .. '%'
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.TurnsRecoveryBonus > 0 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.TurnsRecoveryBonus = config.TurnsRecoveryBonus - 0.5
-			setTurnsRecoveryBonus(config.TurnsRecoveryBonus / 100)
-			t.items[item].vardisplay = config.TurnsRecoveryBonus .. '%'
-			modified = true
 		end
 		return true
 	end,
 	--Min Turns Chars
 	['minturns'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.NumTurns[1] < config.NumTurns[2] then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTurns[1] = config.NumTurns[1] + 1
-			t.items[item].vardisplay = config.NumTurns[1]
+		config.NumTurns[1], changed = options.option_numerical_plage(config.NumTurns[1], 1, config.NumTurns[2], motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.NumTurns[1] > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTurns[1] = config.NumTurns[1] - 1
 			t.items[item].vardisplay = config.NumTurns[1]
-			modified = true
 		end
 		return true
 	end,
 	--Max Turns Chars
 	['maxturns'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.NumTurns[2] < 8 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTurns[2] = config.NumTurns[2] + 1
-			t.items[item].vardisplay = config.NumTurns[2]
+		config.NumTurns[2], changed = options.option_numerical_plage(config.NumTurns[2], config.NumTurns[1], 8, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.NumTurns[2] > config.NumTurns[1] then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTurns[2] = config.NumTurns[2] - 1
 			t.items[item].vardisplay = config.NumTurns[2]
-			modified = true
 		end
 		return true
 	end,
 	--Min Simul Chars
 	['minsimul'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.NumSimul[1] < config.NumSimul[2] then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumSimul[1] = config.NumSimul[1] + 1
-			t.items[item].vardisplay = config.NumSimul[1]
+		config.NumSimul[1], changed = options.option_numerical_plage(config.NumSimul[1], 2, NumSimul[2], motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.NumSimul[1] > 2 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumSimul[1] = config.NumSimul[1] - 1
 			t.items[item].vardisplay = config.NumSimul[1]
-			modified = true
 		end
 		return true
 	end,
 	--Max Simul Chars
 	['maxsimul'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.NumSimul[2] < 8 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumSimul[2] = config.NumSimul[2] + 1
-			t.items[item].vardisplay = config.NumSimul[2]
+		config.NumSimul[2], changed = options.option_numerical_plage(config.NumSimul[2], config.NumSimul[1], 8, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.NumSimul[2] > config.NumSimul[1] then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumSimul[2] = config.NumSimul[2] - 1
-			t.items[item].vardisplay = config.NumSimul[2]
-			modified = true
+			t.items[item].vardisplay = config.NumTurns[2]
 		end
 		return true
 	end,
 	--Min Tag Chars
 	['mintag'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.NumTag[1] < config.NumTag[2] then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTag[1] = config.NumTag[1] + 1
-			t.items[item].vardisplay = config.NumTag[1]
+		config.NumTag[1], changed = options.option_numerical_plage(config.NumTag[1], 2, config.NumTag[2], motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.NumTag[1] > 2 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTag[1] = config.NumTag[1] - 1
 			t.items[item].vardisplay = config.NumTag[1]
-			modified = true
 		end
 		return true
 	end,
 	--Max Tag Chars
 	['maxtag'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) and config.NumTag[2] < 4 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTag[2] = config.NumTag[2] + 1
-			t.items[item].vardisplay = config.NumTag[2]
+		config.NumTag[2], changed = options.option_numerical_plage(config.NumTag[2], config.NumTag[1], 4, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.NumTag[2] > config.NumTag[1] then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.NumTag[2] = config.NumTag[2] - 1
 			t.items[item].vardisplay = config.NumTag[2]
-			modified = true
 		end
 		return true
 	end,
@@ -958,69 +942,41 @@ options.t_itemname = {
 	end,
 	--HelperMax
 	['helpermax'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxHelper = config.MaxHelper + 1
+		config.MaxHelper, changed = options.option_numerical_plage(config.MaxHelper, 1, nil, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = config.MaxHelper
 			setMaxHelper(config.MaxHelper)
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.MaxHelper > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxHelper = config.MaxHelper - 1
-			t.items[item].vardisplay = config.MaxHelper
-			setMaxHelper(config.MaxHelper)
-			modified = true
 		end
 		return true
 	end,
 	--PlayerProjectileMax
 	['projectilemax'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxPlayerProjectile = config.MaxPlayerProjectile + 1
+		config.MaxPlayerProjectile, changed = options.option_numerical_plage(config.MaxPlayerProjectile, 1, nil, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = config.MaxPlayerProjectile
 			setMaxPlayerProjectile(config.MaxPlayerProjectile)
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.MaxPlayerProjectile > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxPlayerProjectile = config.MaxPlayerProjectile - 1
-			t.items[item].vardisplay = config.MaxPlayerProjectile
-			setMaxPlayerProjectile(config.MaxPlayerProjectile)
-			modified = true
 		end
 		return true
 	end,
 	--ExplodMax
 	['explodmax'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxExplod = config.MaxExplod + 1
-			t.items[item].vardisplay = config.MaxExplod
-			setMaxExplod(config.MaxExplod)
+		config.MaxExplod, changed = options.option_numerical_plage(config.MaxExplod, 1, nil, motif.option_info.cursor_move_snd)
+		if changed then
 			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.MaxExplod > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxExplod = config.MaxExplod - 1
 			t.items[item].vardisplay = config.MaxExplod
-			setMaxExplod(config.MaxExplod)
-			modified = true
+			setMaxExplod(config.MaxPlayerProjectile)
 		end
 		return true
 	end,
 	--AfterImageMax
 	['afterimagemax'] = function(cursorPosY, moveTxt, item, t)
-		if main.f_input(main.t_players, {'$F'}) then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxAfterImage = config.MaxAfterImage + 1
+		config.MaxAfterImage, changed = options.option_numerical_plage(config.MaxAfterImage, 1, nil, motif.option_info.cursor_move_snd)
+		if changed then
+			modified = true
 			t.items[item].vardisplay = config.MaxAfterImage
 			setMaxAfterImage(config.MaxAfterImage)
-			modified = true
-		elseif main.f_input(main.t_players, {'$B'}) and config.MaxAfterImage > 1 then
-			sndPlay(motif.files.snd_data, motif.option_info.cursor_move_snd[1], motif.option_info.cursor_move_snd[2])
-			config.MaxAfterImage = config.MaxAfterImage - 1
-			t.items[item].vardisplay = config.MaxAfterImage
-			setMaxAfterImage(config.MaxAfterImage)
-			modified = true
 		end
 		return true
 	end,
@@ -1126,6 +1082,7 @@ options.t_itemname = {
 		return true
 	end,
 }
+
 --external shaders
 options.t_shaders = {}
 for k, v in ipairs(getDirectoryFiles('external/shaders')) do
@@ -1221,6 +1178,7 @@ function options.createMenu(tbl, bool_bgreset, bool_main, bool_f1)
 					if needReload then
 						main.f_warning(main.f_extractText(motif.warning_info.text_noreload_text), motif.option_info, motif.optionbgdef)
 					end
+					option_select.reload_base_character()
 					main.f_menuFade('option_info', 'fadeout', cursorPosY, moveTxt, item, t)
 					main.f_bgReset(motif.titlebgdef.bg)
 					if motif.music.option_bgm ~= '' then
@@ -1233,6 +1191,10 @@ function options.createMenu(tbl, bool_bgreset, bool_main, bool_f1)
 					break
 				end
 				if not options.t_itemname.gamepad(cursorPosY, moveTxt, item, tbl) then
+					break
+				end
+			elseif t[item].func ~= nil then
+				if not t[item].func(cursorPosY, moveTxt, item, tbl) then
 					break
 				end
 			elseif options.t_itemname[t[item].itemname] ~= nil then
@@ -1335,6 +1297,13 @@ if motif.option_info.menu_window_margins_y[1] ~= 0 or motif.option_info.menu_win
 	}
 end
 
+t_menuWindow = {
+	t_menuWindow[1],
+	t_menuWindow[2] * (GameHeight/main.SP_Localcoord[2]),
+	t_menuWindow[3] * (GameWidth/main.SP_Localcoord[1]),
+	t_menuWindow[4] * (GameHeight/main.SP_Localcoord[2])
+}
+
 --dynamically generates all option screen menus and submenus using itemname data stored in main.t_sort table
 options.menu = {title = main.f_itemnameUpper(motif.option_info.title_text, motif.option_info.menu_title_uppercase == 1), submenu = {}, items = {}}
 options.menu.loop = options.createMenu(options.menu, true, true, true)
@@ -1345,7 +1314,7 @@ for i = 1, #main.t_sort.option_info do
 		--populate shaders submenu
 		if main.t_sort.option_info[i]:match('_shaders_back$') and c == 'back' then
 			for k = #options.t_shaders, 1, -1 do
-				table.insert(t_pos.items, 1, {data = text:create({window = t_menuWindow}), itemname = options.t_shaders[k].path .. options.t_shaders[k].filename, displayname = options.t_shaders[k].filename, vardata = text:create({window = t_menuWindow}), vardisplay = options.f_vardisplay(c), selected = false})
+				table.insert(t_pos.items, 1, {data = text:create({}), window = t_menuWindow, itemname = options.t_shaders[k].path .. options.t_shaders[k].filename, displayname = options.t_shaders[k].filename, vardata = text:create({}), vardisplay = options.f_vardisplay(c), selected = false})
 			end
 		end
 		--appending the menu table
@@ -1354,7 +1323,7 @@ for i = 1, #main.t_sort.option_info do
 				options.menu.submenu[c] = {title = main.f_itemnameUpper(motif.option_info['menu_itemname_' .. main.t_sort.option_info[i]], motif.option_info.menu_title_uppercase == 1), submenu = {}, items = {}}
 				options.menu.submenu[c].loop = options.createMenu(options.menu.submenu[c], false, false, false)
 				if not main.t_sort.option_info[i]:match(c .. '_') then
-					table.insert(options.menu.items, {data = text:create({window = t_menuWindow}), itemname = c, displayname = motif.option_info['menu_itemname_' .. main.t_sort.option_info[i]], vardata = text:create({window = t_menuWindow}), vardisplay = options.f_vardisplay(c), selected = false})
+					table.insert(options.menu.items, {data = text:create({}), window = t_menuWindow, itemname = c, displayname = motif.option_info['menu_itemname_' .. main.t_sort.option_info[i]], vardata = text:create({}), vardisplay = options.f_vardisplay(c), selected = false})
 				end
 			end
 			t_pos = options.menu.submenu[c]
@@ -1362,7 +1331,7 @@ for i = 1, #main.t_sort.option_info do
 			if t_pos.submenu[c] == nil or c == 'empty' then
 				t_pos.submenu[c] = {title = main.f_itemnameUpper(motif.option_info['menu_itemname_' .. main.t_sort.option_info[i]], motif.option_info.menu_title_uppercase == 1), submenu = {}, items = {}}
 				t_pos.submenu[c].loop = options.createMenu(t_pos.submenu[c], false, false, false)
-				table.insert(t_pos.items, {data = text:create({window = t_menuWindow}), itemname = c, displayname = motif.option_info['menu_itemname_' .. main.t_sort.option_info[i]], vardata = text:create({window = t_menuWindow}), vardisplay = options.f_vardisplay(c), selected = false})
+				table.insert(t_pos.items, {data = text:create({}), window = t_menuWindow, itemname = c, displayname = motif.option_info['menu_itemname_' .. main.t_sort.option_info[i]], vardata = text:create({}), vardisplay = options.f_vardisplay(c), selected = false})
 			end
 			if j > lastNum then
 				t_pos = t_pos.submenu[c]
@@ -1622,6 +1591,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 	end
 	--draw layerno = 0 backgrounds
 	bgDraw(motif[bgdef].bg, false)
+	local window = text:get_default_window(motif.defaultOptions)
 	--draw player num
 	for i = 1, 2 do
 		txt_keyController[i]:update({
@@ -1639,6 +1609,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 			src =    motif.option_info['menu_item_key_p' .. i .. '_font'][7],
 			dst =    motif.option_info['menu_item_key_p' .. i .. '_font'][8],
 			height = motif.option_info['menu_item_key_p' .. i .. '_font_height'],
+			window = window,
 			defsc =  motif.defaultOptions
 		})
 		txt_keyController[i]:draw()
@@ -1697,6 +1668,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 						src =    motif.option_info.menu_item_active_font[7],
 						dst =    motif.option_info.menu_item_active_font[8],
 						height = motif.option_info.menu_item_active_font_height,
+						window = window,
 						defsc =  motif.defaultOptions
 					})
 					t[i].data[j]:draw()
@@ -1718,6 +1690,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 								src =    motif.option_info.menu_item_value_conflict_font[7],
 								dst =    motif.option_info.menu_item_value_conflict_font[8],
 								height = motif.option_info.menu_item_value_conflict_font_height,
+								window = window,
 								defsc =  motif.defaultOptions
 							})
 							t[i].vardata[j]:draw()
@@ -1738,6 +1711,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 								src =    motif.option_info.menu_item_value_active_font[7],
 								dst =    motif.option_info.menu_item_value_active_font[8],
 								height = motif.option_info.menu_item_value_active_font_height,
+								window = window,
 								defsc =  motif.defaultOptions
 							})
 							t[i].vardata[j]:draw()
@@ -1759,6 +1733,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 							src =    motif.option_info.menu_item_info_active_font[7],
 							dst =    motif.option_info.menu_item_info_active_font[8],
 							height = motif.option_info.menu_item_info_active_font_height,
+							window = window,
 							defsc =  motif.defaultOptions
 						})
 						t[i].infodata[j]:draw()
@@ -1780,6 +1755,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 						src =    motif.option_info.menu_item_font[7],
 						dst =    motif.option_info.menu_item_font[8],
 						height = motif.option_info.menu_item_font_height,
+						window = window,
 						defsc =  motif.defaultOptions
 					})
 					t[i].data[j]:draw()
@@ -1801,6 +1777,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 								src =    motif.option_info.menu_item_value_conflict_font[7],
 								dst =    motif.option_info.menu_item_value_conflict_font[8],
 								height = motif.option_info.menu_item_value_conflict_font_height,
+								window = window,
 								defsc =  motif.defaultOptions
 							})
 							t[i].vardata[j]:draw()
@@ -1821,6 +1798,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 								src =    motif.option_info.menu_item_value_font[7],
 								dst =    motif.option_info.menu_item_value_font[8],
 								height = motif.option_info.menu_item_value_font_height,
+								window = window,
 								defsc =  motif.defaultOptions
 							})
 							t[i].vardata[j]:draw()
@@ -1842,6 +1820,7 @@ function options.f_keyCfg(cfgType, controller, bgdef, skipClear)
 							src =    motif.option_info.menu_item_info_font[7],
 							dst =    motif.option_info.menu_item_info_font[8],
 							height = motif.option_info.menu_item_info_font_height,
+							window = window,
 							defsc =  motif.defaultOptions
 						})
 						t[i].infodata[j]:draw()
